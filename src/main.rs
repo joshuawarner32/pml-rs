@@ -1,7 +1,11 @@
 
 mod consts;
+mod cursor;
+mod errors;
 
 use crate::consts::{EventClass, ProcessOperation, RegistryOperation, FileSystemOperation};
+use crate::cursor::{Cursor, Parse};
+use crate::errors::{FormatError};
 use num_traits::FromPrimitive;    
 use std::mem::MaybeUninit;
 use std::fmt;
@@ -11,14 +15,14 @@ fn main() {
     let file = &args[0];
     let data = std::fs::read(file).unwrap();
 
-    let traces = Traces::decode(&data);
+    let traces = Traces::decode(&data).unwrap();
 
     // println!("{:#?}", traces.header);
     for process in &traces.processes {
         println!("{:?}", DebugPrint(process, &traces));
     }
 
-    traces.print_events();
+    traces.print_events().unwrap();
 }
 
 struct Traces<'a> {
@@ -29,16 +33,17 @@ struct Traces<'a> {
 }
 
 impl<'a> Traces<'a> {
-    fn decode(data: &'a [u8]) -> Traces<'a> {
-        let header = Header::decode(data);
-        let strings = decode_strings(&data[header.offset_to_strings as usize ..]);
-        let processes = decode_processes(&data[header.offset_to_processes as usize ..]);
-        Traces {
+    fn decode(data: &'a [u8]) -> Result<Traces<'a>, FormatError> {
+        let mut c = Cursor::new(data);
+        let header = Header::parse_from(&mut c)?;
+        let strings = decode_strings(&mut c.seek_read_cursor(header.offset_to_strings as usize))?;
+        let processes = decode_processes(&mut c.seek_read_cursor(header.offset_to_processes as usize))?;
+        Ok(Traces {
             data,
             header,
             strings,
             processes,
-        }
+        })
     }
 
     fn find_string(&self, offset: StringIndex) -> &str {
@@ -48,100 +53,105 @@ impl<'a> Traces<'a> {
         &self.strings[offset.0 as usize]
     }
 
-    fn print_events(&self) {
-        let event_offsets = &self.data[self.header.offset_to_event_offsets as usize .. ];
+    fn print_events(&self) -> Result<(), FormatError> {
+        let mut c = Cursor::new(&self.data[self.header.offset_to_event_offsets as usize .. ]);
 
-        for i in 0..self.header.number_of_events as usize {
-            const EVENT_OFFSET_LEN: usize = 5; // 5 because there's an extra flags byte
-            let offset = u32::decode(&event_offsets[EVENT_OFFSET_LEN*i .. ]) as usize;
-            println!("offset: {:?}", offset);
-            let event = Event::from(EventInfo::decode(&self.data[offset..]));
+        for _ in 0..self.header.number_of_events as usize {
+            let offset = u32::parse_from(&mut c)? as usize;
+            let _flags = u8::parse_from(&mut c)?;
+            let info = EventInfo::parse_from(&mut Cursor::new(&self.data[offset..]))?;
+            let detail_base = offset + EventInfo::SIZE + info.detail_offset_from_event as usize;
+            let event = Event::from_info_and_data(
+                info,
+                &self.data[detail_base .. detail_base + info.detail_size as usize])?;
             println!("{:?}", DebugPrint(&event, self));
         }
+        Ok(())
     }
 }
 
-fn decode_strings(data: &[u8]) -> Vec<String> {
-    let count = u32::decode(data) as usize;
+fn decode_strings(c: &mut Cursor) -> Result<Vec<String>, FormatError> {
+    let count = u32::parse_from(c)? as usize;
     let mut offsets = Vec::with_capacity(count);
 
-    for i in 0..count {
-        let offset = u32::decode(&data[4 + 4*i..]) as usize;
+    for _ in 0..count {
+        let offset = u32::parse_from(c)? as usize;
         assert!(offset >= 4 + 4*count);
         offsets.push(offset);
     }
 
-    offsets.push(data.len());
-
     let mut strings = Vec::with_capacity(count);
 
-    for pair in offsets.windows(2) {
-        strings.push(decode_string(&data[pair[0] .. pair[1]]));
+    for offset in offsets {
+        strings.push(decode_string(&mut c.seek_read_cursor(offset))?);
     }
 
-    strings
+    Ok(strings)
 }
 
-fn decode_string(data: &[u8]) -> String {
-    let len = u32::decode(data) as usize;
+fn decode_string(c: &mut Cursor) -> Result<String, FormatError> {
+    let len: u32 = c.read()?;
+    let len = len as usize;
     assert!(len & 1 == 0); // len must be even, it's in bytes
-    let data = &data[4 .. 4 + len];
+    let mut data_c = c.read_cursor(len);
 
     // TODO: use some util library to decode u16's/etc
     let mut values = Vec::with_capacity(len / 2);
-    for i in 0..len/2 {
-        values.push(u16::decode(&data[2*i .. ]));
+    for _ in 0..len/2 {
+        values.push(u16::parse_from(&mut data_c)?);
     }
 
     if let Some(last) = values.pop() {
         assert_eq!(last, 0);
     }
 
-    String::from_utf16(&values).unwrap()
+    String::from_utf16(&values).map_err(|_| FormatError::Utf16Error)
 }
 
-fn decode_processes(data: &[u8]) -> Vec<Process> {
-    let count = u32::decode(data) as usize;
+fn decode_processes(c: &mut Cursor) -> Result<Vec<Process>, FormatError> {
+    let count: u32 = c.read()?;
+    let count = count as usize;
     // let mut indexes = Vec::with_capacity(count);
     let mut offsets = Vec::with_capacity(count);
     let mut processes = Vec::with_capacity(count);
 
-
     // Don't bother decoding the process indices, jump straight to the offsets
-    for i in 0..count {
-        let offset = u32::decode(&data[4 + 4*count + 4*i..]) as usize;
-        // assert_eq!(u32::decode(&data[offset..]), i as u32);
+    c.read_bytes(4*count);
+
+    for _ in 0..count {
+        let offset = u32::parse_from(c)? as usize;
+        // assert_eq!(u32::parse_from(&data[offset..]), i as u32);
         // assert!(offset >= 4 + (4*count)*3);
         offsets.push(offset);
     }
 
     // for i in 0..count {
-    //     let offset = u32::decode(&data[4 + 4*i..]) as usize;
+    //     let offset = u32::parse_from(&data[4 + 4*i..]) as usize;
     //     // assert!(offset >= 4 + (4*count)*3);
     //     string_offsets.push(offset);
     // }
 
     for offset in offsets {
-        processes.push(Process::decode(&data[offset..]));
+        processes.push(Process::parse_from(&mut c.seek_read_cursor(offset))?);
     }
 
-    processes
+    Ok(processes)
 }
 
 macro_rules! decode_field {
     (
         $simple:ident,
-        $data:expr
+        $c:expr
     ) => {
-        $simple::decode($data)
+        $simple::parse_from($c)?
     };
     (
         [$simple:ident; $len:expr],
-        $data:expr
+        $c:expr
     ) => {{
         unsafe {
             let mut res: [MaybeUninit<$simple>; $len] = MaybeUninit::uninit().assume_init();
-            decode_array($data, &mut res);
+            decode_array($c, &mut res)?;
             std::mem::transmute(res)
         }
     }}
@@ -163,21 +173,21 @@ macro_rules! decode_struct {
             ),*
         }
 
-        impl $name {
-            fn decode(data: &[u8]) -> $name {
+        impl Parse for $name {
+            fn parse_from(c: &mut Cursor) -> Result<$name, FormatError> {
                 let cur_zeros_array: [u8; 0] = [];
 
                 $(
                     let _: [u8; $field_offset] = cur_zeros_array;
                     let cur_zeros_array: [u8; $field_offset + std::mem::size_of::<$field_ty>()] = [0; $field_offset + std::mem::size_of::<$field_ty>()];
-                    let $field_name = decode_field!($field_ty, &data[$field_offset..]);
+                    let $field_name = decode_field!($field_ty, c);
                 )*
 
                 let _ = cur_zeros_array;
 
-                $name {
+                Ok($name {
                     $($field_name),*
-                }
+                })
             }
         }
     };
@@ -257,48 +267,11 @@ decode_struct! {
     }
 }
 
-trait Decode {
-    fn decode(data: &[u8]) -> Self;
-}
-
-impl Decode for u8 {
-    fn decode(data: &[u8]) -> Self {
-        let mut bytes = [0; std::mem::size_of::<Self>()];
-        bytes.copy_from_slice(&data[0..std::mem::size_of::<Self>()]);
-        Self::from_le_bytes(bytes)
-    }
-}
-
-impl Decode for u16 {
-    fn decode(data: &[u8]) -> Self {
-        let mut bytes = [0; std::mem::size_of::<Self>()];
-        bytes.copy_from_slice(&data[0..std::mem::size_of::<Self>()]);
-        Self::from_le_bytes(bytes)
-    }
-}
-
-impl Decode for u32 {
-    fn decode(data: &[u8]) -> Self {
-        let mut bytes = [0; std::mem::size_of::<Self>()];
-        bytes.copy_from_slice(&data[0..std::mem::size_of::<Self>()]);
-        Self::from_le_bytes(bytes)
-    }
-}
-
-impl Decode for u64 {
-    fn decode(data: &[u8]) -> Self {
-        let mut bytes = [0; std::mem::size_of::<Self>()];
-        bytes.copy_from_slice(&data[0..std::mem::size_of::<Self>()]);
-        Self::from_le_bytes(bytes)
-    }
-}
-
-fn decode_array<T: Decode>(items: &[u8], output: &mut [MaybeUninit<T>]) {
-    let mut offset = 0;
+unsafe fn decode_array<T: Parse>(c: &mut Cursor, output: &mut [MaybeUninit<T>]) -> Result<(), FormatError> {
     for res in output {
-        *res = MaybeUninit::new(T::decode(&items[offset..]));
-        offset += std::mem::size_of::<T>();
+        *res = MaybeUninit::new(T::parse_from(c)?);
     }
+    Ok(())
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
@@ -307,19 +280,20 @@ struct ProcessIndex(u32);
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 struct StringIndex(u32);
 
-impl Decode for StringIndex {
-    fn decode(data: &[u8]) -> Self {
-        Self(u32::decode(data))
+impl Parse for StringIndex {
+    fn parse_from(c: &mut Cursor) -> Result<Self, FormatError> {
+        Ok(Self(u32::parse_from(c)?))
     }
 }
-impl Decode for ProcessIndex {
-    fn decode(data: &[u8]) -> Self {
-        Self(u32::decode(data))
+impl Parse for ProcessIndex {
+    fn parse_from(c: &mut Cursor) -> Result<Self, FormatError> {
+        Ok(Self(u32::parse_from(c)?))
     }
 }
-impl Decode for EventClass {
-    fn decode(data: &[u8]) -> Self {
-        Self::from_u32(u32::decode(data)).unwrap()
+impl Parse for EventClass {
+    fn parse_from(c: &mut Cursor) -> Result<Self, FormatError> {
+        let id = u32::parse_from(c)?;
+        Self::from_u32(id).ok_or_else(|| FormatError::InvalidEventClass(id))
     }
 }
 
@@ -433,6 +407,10 @@ decode_struct! {
     }
 }
 
+impl EventInfo {
+    const SIZE: usize = 0x34; // TODO assert things about this and the last #[offset(0x30)] above
+}
+
 struct DebugPrint<'a, T>(&'a T, &'a Traces<'a>);
 
 impl<'a> fmt::Debug for DebugPrint<'a, Process> {
@@ -519,9 +497,11 @@ struct RegistryEventDetail {
 }
 
 #[derive(Debug)]
-struct FileSystemEventDetail {
-    op: FileSystemOperation,
+enum FileSystemEventDetail {
+    CreateFile(CreateFileEventDetails),
+    Other(FileSystemOperation),
 }
+
 
 #[derive(Debug)]
 struct ProfilingEventDetail {
@@ -533,9 +513,9 @@ struct NetworkEventDetail {
 
 }
 
-impl From<EventInfo> for Event {
-    fn from(e: EventInfo) -> Event {
-        Event {
+impl Event {
+    fn from_info_and_data(e: EventInfo, data: &[u8]) -> Result<Event, FormatError> {
+        Ok(Event {
             process_index: e.process_index,
             thread_id: e.thread_id,
             event_detail: match e.event_class {
@@ -562,9 +542,12 @@ impl From<EventInfo> for Event {
                 },
                 EventClass::FileSystem => {
                     let op = FileSystemOperation::from_u16(e.event_type).expect("invalid process operation");
-                    EventDetail::FileSystem(FileSystemEventDetail {
-                        op,
-                    })
+                    EventDetail::FileSystem(
+                        match op {
+                            FileSystemOperation::CreateFile => FileSystemEventDetail::CreateFile(CreateFileEventDetails::parse_from(&mut Cursor::new(data))?),
+                            op => FileSystemEventDetail::Other(op),
+                        }
+                    )
                 },
                 EventClass::Profiling => {
                     EventDetail::Profiling(ProfilingEventDetail {})
@@ -579,23 +562,82 @@ impl From<EventInfo> for Event {
             time: e.time,
             result: e.result,
             captured_stack_depth: e.captured_stack_depth,
-        }
+        })
     }
 }
+
+decode_struct! {
+    struct CreateFileEventDetails {
+        #[offset(0x0)]
+        desired_access: u32,
+
+        #[offset(0x4)]
+        impersonating_sid_length: u8,
+
+        #[offset(0x5)]
+        padding_0: [u8; 3]
+    }
+}
+
+// def get_filesystem_create_file_details(io, metadata, event, details_io, extra_detail_io):
+//     event.details["Desired Access"] = get_filesystem_access_mask_string(read_u32(io))
+//     impersonating_sid_length = read_u8(io)
+//     io.seek(0x3, 1)  # padding
+
+//     details_io.seek(0x10, 1)
+//     if metadata.sizeof_pvoid == 8:
+//         details_io.seek(4, 1)  # Padding for 64 bit
+
+//     disposition_and_options = read_u32(details_io)
+//     disposition = disposition_and_options >> 0x18
+//     options = disposition_and_options & 0xffffff
+//     if metadata.sizeof_pvoid == 8:
+//         details_io.seek(4, 1)  # Padding for 64 bit
+//     attributes = read_u16(details_io)
+//     share_mode = read_u16(details_io)
+
+//     event.details["Disposition"] = get_enum_name_or(FilesystemDisposition, disposition, "<unknown>")
+//     event.details["Options"] = get_filesysyem_create_options(options)
+//     event.details["Attributes"] = get_filesysyem_create_attributes(attributes)
+//     event.details["ShareMode"] = get_filesysyem_create_share_mode(share_mode)
+
+//     details_io.seek(0x4 + metadata.sizeof_pvoid * 2, 1)
+//     allocation = read_u32(details_io)
+//     allocation_value = allocation if disposition in [FilesystemDisposition.Supersede, FilesystemDisposition.Create,
+//                                                      FilesystemDisposition.OpenIf,
+//                                                      FilesystemDisposition.OverwriteIf] else "n/a"
+//     event.details["AllocationSize"] = allocation_value
+
+//     if impersonating_sid_length:
+//         event.details["Impersonating"] = get_sid_string(io.read(impersonating_sid_length))
+
+//     open_result = None
+//     if extra_detail_io:
+//         open_result = read_u32(extra_detail_io)
+//         event.details["OpenResult"] = get_enum_name_or(FilesystemOpenResult, open_result, "<unknown>")
+
+//     if open_result in [FilesystemOpenResult.Superseded, FilesystemOpenResult.Created, FilesystemOpenResult.Overwritten]:
+//         event.category = "Write"
+//     elif open_result in [FilesystemOpenResult.Opened, FilesystemOpenResult.Exists, FilesystemOpenResult.DoesNotExist]:
+//         pass
+//     elif event.details["Disposition"] in ["Open", "<unknown>"]:
+//         pass
+//     else:
+//         event.category = "Write"
 
 
 struct Process {
     header: ProcessHeader,
 }
 
-impl Decode for Process {
-    fn decode(data: &[u8]) -> Self {
-        let header = ProcessHeader::decode(data);
+impl Parse for Process {
+    fn parse_from(c: &mut Cursor) -> Result<Self, FormatError> {
+        let header = ProcessHeader::parse_from(c)?;
 
         // TODO: decode modules
-        Process {
+        Ok(Process {
             header,
-        }
+        })
     }
 }
 
