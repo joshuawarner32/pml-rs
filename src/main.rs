@@ -56,14 +56,29 @@ impl<'a> Traces<'a> {
     fn print_events(&self) -> Result<(), FormatError> {
         let mut c = Cursor::new(&self.data[self.header.offset_to_event_offsets as usize .. ]);
 
+        let ptr_bytes = match self.header.is_64_bit {
+            0 => 4,
+            1 => 8,
+            _ => panic!(), // TODO: FormatError
+        };
+
         for _ in 0..self.header.number_of_events as usize {
             let offset = u32::parse_from(&mut c)? as usize;
             let _flags = u8::parse_from(&mut c)?;
-            let info = EventInfo::parse_from(&mut Cursor::new(&self.data[offset..]))?;
-            let detail_base = offset + EventInfo::SIZE + info.detail_offset_from_event as usize;
+            let mut event_c = Cursor::new(&self.data[offset..]);
+            let info = EventInfo::parse_from(&mut event_c)?;
+            // dbg!(&info);
+            let stack_trace_size = info.captured_stack_depth as usize * ptr_bytes;
+            let _stack_trace = event_c.read_bytes(stack_trace_size);
+            // hexdump(_stack_trace);
+            // println!("---");
+            let details = event_c.read_bytes(info.detail_size as usize);
+            // assert_eq!(stack_trace_size, info.extra_detail_offset_from_event as usize);
+            // hexdump(details);
             let event = Event::from_info_and_data(
+                ptr_bytes,
                 info,
-                &self.data[detail_base .. detail_base + info.detail_size as usize])?;
+                details)?;
             println!("{:?}", DebugPrint(&event, self));
         }
         Ok(())
@@ -95,14 +110,18 @@ fn decode_string(c: &mut Cursor) -> Result<String, FormatError> {
     assert!(len & 1 == 0); // len must be even, it's in bytes
     let mut data_c = c.read_cursor(len);
 
+    decode_sized_string(&mut data_c, len / 2)
+}
+
+fn decode_sized_string(c: &mut Cursor, chars: usize) -> Result<String, FormatError> {
     // TODO: use some util library to decode u16's/etc
-    let mut values = Vec::with_capacity(len / 2);
-    for _ in 0..len/2 {
-        values.push(u16::parse_from(&mut data_c)?);
+    let mut values = Vec::with_capacity(chars);
+    for _ in 0..chars {
+        values.push(u16::parse_from(c)?);
     }
 
-    if let Some(last) = values.pop() {
-        assert_eq!(last, 0);
+    if values.last() == Some(&0) {
+        values.pop();
     }
 
     String::from_utf16(&values).map_err(|_| FormatError::Utf16Error)
@@ -403,12 +422,8 @@ decode_struct! {
         detail_size: u32,
         
         #[offset(0x30)]
-        detail_offset_from_event: u32
+        extra_detail_offset_from_event: u32
     }
-}
-
-impl EventInfo {
-    const SIZE: usize = 0x34; // TODO assert things about this and the last #[offset(0x30)] above
 }
 
 struct DebugPrint<'a, T>(&'a T, &'a Traces<'a>);
@@ -497,7 +512,14 @@ struct RegistryEventDetail {
 }
 
 #[derive(Debug)]
-enum FileSystemEventDetail {
+struct FileSystemEventDetail {
+    sub_op: u8,
+    path: String,
+    ty: FileSystemEventType,
+}
+
+#[derive(Debug)]
+enum FileSystemEventType {
     CreateFile(CreateFileEventDetails),
     Other(FileSystemOperation),
 }
@@ -514,7 +536,8 @@ struct NetworkEventDetail {
 }
 
 impl Event {
-    fn from_info_and_data(e: EventInfo, data: &[u8]) -> Result<Event, FormatError> {
+    fn from_info_and_data(ptr_bytes: usize, e: EventInfo, data: &[u8]) -> Result<Event, FormatError> {
+        let mut c = Cursor::new(data);
         Ok(Event {
             process_index: e.process_index,
             thread_id: e.thread_id,
@@ -541,13 +564,7 @@ impl Event {
                     })
                 },
                 EventClass::FileSystem => {
-                    let op = FileSystemOperation::from_u16(e.event_type).expect("invalid process operation");
-                    EventDetail::FileSystem(
-                        match op {
-                            FileSystemOperation::CreateFile => FileSystemEventDetail::CreateFile(CreateFileEventDetails::parse_from(&mut Cursor::new(data))?),
-                            op => FileSystemEventDetail::Other(op),
-                        }
-                    )
+                    EventDetail::FileSystem(FileSystemEventDetail::parse_event_type_data(ptr_bytes, e.event_type, &mut c)?)
                 },
                 EventClass::Profiling => {
                     EventDetail::Profiling(ProfilingEventDetail {})
@@ -566,16 +583,107 @@ impl Event {
     }
 }
 
-decode_struct! {
-    struct CreateFileEventDetails {
-        #[offset(0x0)]
-        desired_access: u32,
+// def get_filesystem_event_details(io, metadata, event, extra_detail_io):
+//     sub_operation = read_u8(io)
+//     io.seek(0x3, 1)  # padding
 
-        #[offset(0x4)]
-        impersonating_sid_length: u8,
+//     # fix operation name if there is more specific sub operation
+//     if 0 != sub_operation and FilesystemOperation[event.operation] in FilesystemSubOperations:
+//         try:
+//             event.operation = FilesystemSubOperations[FilesystemOperation[event.operation]](sub_operation).name
+//         except ValueError:
+//             event.operation += " <Unknown>"
 
-        #[offset(0x5)]
-        padding_0: [u8; 3]
+//     details_io = BytesIO(io.read(metadata.sizeof_pvoid * 5 + 0x14))
+//     path_info = read_detail_string_info(io)
+//     io.seek(2, 1)  # Padding
+//     event.path = read_detail_string(io, path_info)
+//     if metadata.should_get_details and event.operation in FilesystemSubOperationHandler:
+//         FilesystemSubOperationHandler[event.operation](io, metadata, event, details_io, extra_detail_io)
+
+fn hexdump(bytes: &[u8]) {
+    let mut line = String::new();
+    for c in bytes.chunks(16) {
+        for i in 0..16 {
+            if i & 0x3 == 0 && i > 0 {
+                line.push(' ');
+            }
+            if let Some(b) = c.get(i) {
+                line.push_str(&format!("{:02x} ", b));
+            } else {
+                line.push_str("   ");
+            }
+        }
+
+        line.push_str("| ");
+
+        for b in c {
+            if b.is_ascii() && !(*b as char).is_ascii_control() {
+                line.push(*b as char);
+            } else {
+                line.push('.');
+            }
+        }
+        println!("{}", line);
+        line.clear();
+    }
+}
+
+impl FileSystemEventDetail {
+    pub fn parse_event_type_data(ptr_bytes: usize, event_type: u16, c: &mut Cursor) -> Result<Self, FormatError> {
+        let op = FileSystemOperation::from_u16(event_type).expect("invalid process operation");
+        let sub_op: u8 = c.read()?;
+        c.read_bytes(3); // padding
+
+        let mut details_c = c.read_cursor(ptr_bytes * 5 + 0x14);
+
+        let path_info = read_path_info(c)?;
+
+        c.read_bytes(2); // padding
+
+        let path = read_detail_string(c, path_info)?;
+
+        let ty = match op {
+            FileSystemOperation::CreateFile => FileSystemEventType::CreateFile(CreateFileEventDetails::parse_from(&mut details_c)?),
+            op => FileSystemEventType::Other(op),
+        };
+
+        Ok(FileSystemEventDetail {
+            sub_op,
+            path,
+            ty,
+        })
+    }
+}
+
+fn read_path_info(c: &mut Cursor) -> Result<(bool, usize), FormatError> {
+    let flags: u16 = c.read()?;
+    Ok((flags >> 15 == 1, (flags & !(1 << 15)) as usize))
+}
+
+fn read_detail_string(c: &mut Cursor, (is_ascii, chars): (bool, usize)) -> Result<String, FormatError> {
+    if is_ascii {
+        let bytes = c.read_bytes(chars);
+        String::from_utf8(bytes.to_vec()).map_err(|_| FormatError::AsciiError)
+    } else {
+        decode_sized_string(c, chars)
+    }
+}
+
+#[derive(Debug)]
+struct CreateFileEventDetails {
+    desired_access: u32,
+    impersonating_sid_length: u8,
+}
+
+impl CreateFileEventDetails {
+    pub fn parse_from(c: &mut Cursor) -> Result<Self, FormatError> {
+        let desired_access = c.read()?;
+        let impersonating_sid_length = c.read()?;
+        Ok(CreateFileEventDetails {
+            desired_access,
+            impersonating_sid_length,
+        })
     }
 }
 
