@@ -3,6 +3,7 @@ mod consts;
 mod cursor;
 mod errors;
 
+use std::collections::HashMap;
 use std::io::Write;
 use crate::consts::{EventClass, ProcessOperation, RegistryOperation, FileSystemOperation};
 use crate::cursor::{Cursor, Parse};
@@ -10,6 +11,8 @@ use crate::errors::{FormatError};
 use num_traits::FromPrimitive;    
 use std::mem::MaybeUninit;
 use std::fmt;
+use chrono::prelude::*;
+use chrono::Duration;
 
 fn main() {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
@@ -21,9 +24,10 @@ fn main() {
     let traces = Traces::decode(&data).unwrap();
 
     // println!("{:#?}", traces.header);
-    // for process in &traces.processes {
-    //     println!("{:?}", DebugPrint(process, &traces));
-    // }
+
+    for (i, process) in &traces.processes {
+        println!("{}: {:?}", i.0, DebugPrint(process, &traces));
+    }
 
     let mut w = csv::WriterBuilder::new().from_path(output).unwrap();
 
@@ -35,7 +39,7 @@ struct Traces<'a> {
     data: &'a [u8],
     header: Header,
     strings: Vec<String>,
-    processes: Vec<Process>,
+    processes: HashMap<ProcessIndex, Process>,
 }
 
 impl<'a> Traces<'a> {
@@ -77,47 +81,34 @@ impl<'a> Traces<'a> {
     }
 
     fn write_csv_events<W: Write>(&self, w: &mut csv::Writer<W>) -> anyhow::Result<()> {
-        w.write_record(&["time", "duration", "category", "subcategory"])?;
+        let time_base = Utc.ymd(1601, 1, 1).and_hms(0, 0, 0);
+        w.write_record(&["time", "duration", "category", "subcategory", "process", "path"])?;
 
         for event in self.iter_events() {
             let event = event?;
+            let time = time_base + Duration::nanoseconds(event.time as i64) * 100;
+            let process = self.processes.get(&event.process_index);
+            if process.is_none() {
+                println!("WARNING: couldn't find process for {0} / {0:x}", event.process_index.0);
+            }
+            let process_path = process.map(|p| self.strings[p.header.image_path_string_index.0 as usize].as_str());
             w.write_record(&[
-                &format!("{}", event.time),
+                &format!("{}", time),
                 &format!("{}", event.duration_in_100ns),
                 event.event_detail.describe_category(),
                 event.event_detail.describe_subcategory(),
+                process_path.unwrap_or("<unknown>"),
+                event.event_detail.path().unwrap_or(""),
             ])?;
         }
 
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn print_events(&self) -> Result<(), FormatError> {
-        let mut c = Cursor::new(&self.data[self.header.offset_to_event_offsets as usize .. ]);
-
-        let ptr_bytes = match self.header.is_64_bit {
-            0 => 4,
-            1 => 8,
-            _ => panic!(), // TODO: FormatError
-        };
-
-        for _ in 0..self.header.number_of_events as usize {
-            let offset = u32::parse_from(&mut c)? as usize;
-            let _flags = u8::parse_from(&mut c)?;
-            let mut event_c = Cursor::new(&self.data[offset..]);
-            let info = EventInfo::parse_from(&mut event_c)?;
-            // dbg!(&info);
-            let stack_trace_size = info.captured_stack_depth as usize * ptr_bytes;
-            let _stack_trace = event_c.read_bytes(stack_trace_size);
-            // hexdump(_stack_trace);
-            // println!("---");
-            let details = event_c.read_bytes(info.detail_size as usize);
-            // assert_eq!(stack_trace_size, info.extra_detail_offset_from_event as usize);
-            // hexdump(details);
-            let event = Event::from_info_and_data(
-                ptr_bytes,
-                info,
-                details)?;
+        for event in self.iter_events() {
+            let event = event?;
             println!("{:?}", DebugPrint(&event, self));
         }
         Ok(())
@@ -208,12 +199,12 @@ fn decode_sized_string(c: &mut Cursor, chars: usize) -> Result<String, FormatErr
     String::from_utf16(&values).map_err(|_| FormatError::Utf16Error)
 }
 
-fn decode_processes(c: &mut Cursor) -> Result<Vec<Process>, FormatError> {
+fn decode_processes(c: &mut Cursor) -> Result<HashMap<ProcessIndex, Process>, FormatError> {
     let count: u32 = c.read()?;
     let count = count as usize;
     // let mut indexes = Vec::with_capacity(count);
     let mut offsets = Vec::with_capacity(count);
-    let mut processes = Vec::with_capacity(count);
+    let mut processes = HashMap::with_capacity(count);
 
     // Don't bother decoding the process indices, jump straight to the offsets
     c.read_bytes(4*count);
@@ -232,7 +223,8 @@ fn decode_processes(c: &mut Cursor) -> Result<Vec<Process>, FormatError> {
     // }
 
     for offset in offsets {
-        processes.push(Process::parse_from(&mut c.seek_read_cursor(offset))?);
+        let proc = Process::parse_from(&mut c.seek_read_cursor(offset))?;
+        processes.insert(proc.header.process_index, proc);
     }
 
     Ok(processes)
@@ -400,7 +392,7 @@ impl Parse for EventClass {
 decode_struct! {
     struct ProcessHeader {
         #[offset(0x0)]
-        process_index: u32,
+        process_index: ProcessIndex,
 
         #[offset(0x4)]
         process_id: u32,
@@ -574,6 +566,16 @@ enum EventDetail {
 }
 
 impl EventDetail {
+    fn path(&self) -> Option<&str> {
+        match self {
+            EventDetail::Process(e) => e.path(),
+            EventDetail::Registry(e) => e.path(),
+            EventDetail::FileSystem(e) => e.path(),
+            EventDetail::Profiling(e) => e.path(),
+            EventDetail::Network(e) => e.path(),
+        }
+    }
+
     fn describe_category(&self) -> &'static str {
         match self {
             EventDetail::Process(_) => "Process",
@@ -610,6 +612,10 @@ enum ProcessEventDetail {
 }
 
 impl ProcessEventDetail {
+    fn path(&self) -> Option<&str> {
+        None
+    }
+
     fn describe_subcategory(&self) -> &'static str {
         match self {
             ProcessEventDetail::ProcessDefined => "ProcessDefined",
@@ -632,6 +638,10 @@ struct RegistryEventDetail {
 }
 
 impl RegistryEventDetail {
+    fn path(&self) -> Option<&str> {
+        None
+    }
+
     fn describe_subcategory(&self) -> &'static str {
         match self.op {
             RegistryOperation::RegOpenKey => "RegOpenKey",
@@ -664,6 +674,10 @@ struct FileSystemEventDetail {
 }
 
 impl FileSystemEventDetail {
+    fn path(&self) -> Option<&str> {
+        Some(&self.path)
+    }
+
     fn describe_subcategory(&self) -> &'static str {
         match self.ty {
             FileSystemEventType::CreateFile(_) => "CreateFile",
@@ -734,6 +748,10 @@ struct ProfilingEventDetail {
 }
 
 impl ProfilingEventDetail {
+    fn path(&self) -> Option<&str> {
+        None
+    }
+
     fn describe_subcategory(&self) -> &'static str {
         "<unknown>"
     }
@@ -745,6 +763,10 @@ struct NetworkEventDetail {
 }
 
 impl NetworkEventDetail {
+    fn path(&self) -> Option<&str> {
+        None
+    }
+
     fn describe_subcategory(&self) -> &'static str {
         "<unknown>"
     }
