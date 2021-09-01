@@ -3,6 +3,7 @@ mod consts;
 mod cursor;
 mod errors;
 
+use std::io::Write;
 use crate::consts::{EventClass, ProcessOperation, RegistryOperation, FileSystemOperation};
 use crate::cursor::{Cursor, Parse};
 use crate::errors::{FormatError};
@@ -13,16 +14,21 @@ use std::fmt;
 fn main() {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     let file = &args[0];
+    let output = &args[1];
+    assert_eq!(args.len(), 2);
     let data = std::fs::read(file).unwrap();
 
     let traces = Traces::decode(&data).unwrap();
 
     // println!("{:#?}", traces.header);
-    for process in &traces.processes {
-        println!("{:?}", DebugPrint(process, &traces));
-    }
+    // for process in &traces.processes {
+    //     println!("{:?}", DebugPrint(process, &traces));
+    // }
 
-    traces.print_events().unwrap();
+    let mut w = csv::WriterBuilder::new().from_path(output).unwrap();
+
+    // traces.print_events().unwrap();
+    traces.write_csv_events(&mut w).unwrap();
 }
 
 struct Traces<'a> {
@@ -51,6 +57,39 @@ impl<'a> Traces<'a> {
         // println!("BLARG {:?}", offset);
         // let index = self.string_offsets[&offset];
         &self.strings[offset.0 as usize]
+    }
+
+    fn iter_events(&self) -> EventIter {
+        let c = Cursor::new(&self.data[self.header.offset_to_event_offsets as usize .. ]);
+
+        let ptr_bytes = match self.header.is_64_bit {
+            0 => 4,
+            1 => 8,
+            _ => panic!(), // TODO: FormatError
+        };
+        
+        EventIter {
+            c,
+            ptr_bytes,
+            data: self.data,
+            remaining_events: self.header.number_of_events as usize,
+        }
+    }
+
+    fn write_csv_events<W: Write>(&self, w: &mut csv::Writer<W>) -> anyhow::Result<()> {
+        w.write_record(&["time", "duration", "category", "subcategory"])?;
+
+        for event in self.iter_events() {
+            let event = event?;
+            w.write_record(&[
+                &format!("{}", event.time),
+                &format!("{}", event.duration_in_100ns),
+                event.event_detail.describe_category(),
+                event.event_detail.describe_subcategory(),
+            ])?;
+        }
+
+        Ok(())
     }
 
     fn print_events(&self) -> Result<(), FormatError> {
@@ -82,6 +121,48 @@ impl<'a> Traces<'a> {
             println!("{:?}", DebugPrint(&event, self));
         }
         Ok(())
+    }
+}
+
+struct EventIter<'a> {
+    c: Cursor<'a>,
+    data: &'a [u8],
+    ptr_bytes: usize,
+    remaining_events: usize,
+}
+
+impl<'a> EventIter<'a> {
+    fn next_event(&mut self) -> Result<Event, FormatError> {
+        let offset = u32::parse_from(&mut self.c)? as usize;
+        let _flags = u8::parse_from(&mut self.c)?;
+        let mut event_c = Cursor::new(&self.data[offset..]);
+        let info = EventInfo::parse_from(&mut event_c)?;
+        // dbg!(&info);
+        let stack_trace_size = info.captured_stack_depth as usize * self.ptr_bytes;
+        let _stack_trace = event_c.read_bytes(stack_trace_size);
+        // hexdump(_stack_trace);
+        // println!("---");
+        let details = event_c.read_bytes(info.detail_size as usize);
+        // assert_eq!(stack_trace_size, info.extra_detail_offset_from_event as usize);
+        // hexdump(details);
+        let event = Event::from_info_and_data(
+            self.ptr_bytes,
+            info,
+            details)?;
+        
+        Ok(event)
+    }
+}
+
+impl<'a> Iterator for EventIter<'a> {
+    type Item = Result<Event, FormatError>;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.remaining_events == 0 {
+            return None;
+        }
+        self.remaining_events -= 1;
+
+        Some(self.next_event())
     }
 }
 
@@ -492,6 +573,28 @@ enum EventDetail {
     Network(NetworkEventDetail),
 }
 
+impl EventDetail {
+    fn describe_category(&self) -> &'static str {
+        match self {
+            EventDetail::Process(_) => "Process",
+            EventDetail::Registry(_) => "Registry",
+            EventDetail::FileSystem(_) => "FileSystem",
+            EventDetail::Profiling(_) => "Profiling",
+            EventDetail::Network(_) => "Network",
+        }
+    }
+
+    fn describe_subcategory(&self) -> &'static str {
+        match self {
+            EventDetail::Process(e) => e.describe_subcategory(),
+            EventDetail::Registry(e) => e.describe_subcategory(),
+            EventDetail::FileSystem(e) => e.describe_subcategory(),
+            EventDetail::Profiling(e) => e.describe_subcategory(),
+            EventDetail::Network(e) => e.describe_subcategory(),
+        }
+    }
+}
+
 #[derive(Debug)]
 enum ProcessEventDetail {
     ProcessDefined,
@@ -506,9 +609,51 @@ enum ProcessEventDetail {
     SystemStatistics,
 }
 
+impl ProcessEventDetail {
+    fn describe_subcategory(&self) -> &'static str {
+        match self {
+            ProcessEventDetail::ProcessDefined => "ProcessDefined",
+            ProcessEventDetail::ProcessCreate => "ProcessCreate",
+            ProcessEventDetail::ProcessExit => "ProcessExit",
+            ProcessEventDetail::ThreadCreate => "ThreadCreate",
+            ProcessEventDetail::ThreadExit => "ThreadExit",
+            ProcessEventDetail::LoadImage => "LoadImage",
+            ProcessEventDetail::ThreadProfile => "ThreadProfile",
+            ProcessEventDetail::ProcessStart => "ProcessStart",
+            ProcessEventDetail::ProcessStatistics => "ProcessStatistics",
+            ProcessEventDetail::SystemStatistics => "SystemStatistics",
+        }
+    }
+}
+
 #[derive(Debug)]
 struct RegistryEventDetail {
     op: RegistryOperation,
+}
+
+impl RegistryEventDetail {
+    fn describe_subcategory(&self) -> &'static str {
+        match self.op {
+            RegistryOperation::RegOpenKey => "RegOpenKey",
+            RegistryOperation::RegCreateKey => "RegCreateKey",
+            RegistryOperation::RegCloseKey => "RegCloseKey",
+            RegistryOperation::RegQueryKey => "RegQueryKey",
+            RegistryOperation::RegSetValue => "RegSetValue",
+            RegistryOperation::RegQueryValue => "RegQueryValue",
+            RegistryOperation::RegEnumValue => "RegEnumValue",
+            RegistryOperation::RegEnumKey => "RegEnumKey",
+            RegistryOperation::RegSetInfoKey => "RegSetInfoKey",
+            RegistryOperation::RegDeleteKey => "RegDeleteKey",
+            RegistryOperation::RegDeleteValue => "RegDeleteValue",
+            RegistryOperation::RegFlushKey => "RegFlushKey",
+            RegistryOperation::RegLoadKey => "RegLoadKey",
+            RegistryOperation::RegUnloadKey => "RegUnloadKey",
+            RegistryOperation::RegRenameKey => "RegRenameKey",
+            RegistryOperation::RegQueryMultipleValueKey => "RegQueryMultipleValueKey",
+            RegistryOperation::RegSetKeySecurity => "RegSetKeySecurity",
+            RegistryOperation::RegQueryKeySecurity => "RegQueryKeySecurity",
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -516,6 +661,64 @@ struct FileSystemEventDetail {
     sub_op: u8,
     path: String,
     ty: FileSystemEventType,
+}
+
+impl FileSystemEventDetail {
+    fn describe_subcategory(&self) -> &'static str {
+        match self.ty {
+            FileSystemEventType::CreateFile(_) => "CreateFile",
+            FileSystemEventType::Other(e) => match e {
+                FileSystemOperation::VolumeDismount => "IRP_MJ_VOLUME_DISMOUNT",
+                FileSystemOperation::VolumeMount => "IRP_MJ_VOLUME_MOUNT",
+                FileSystemOperation::FastioMdlWriteComplete => "FASTIO_MDL_WRITE_COMPLETE",
+                FileSystemOperation::WriteFile2 => "FASTIO_PREPARE_MDL_WRITE",
+                FileSystemOperation::FastioMdlReadComplete => "FASTIO_MDL_READ_COMPLETE",
+                FileSystemOperation::ReadFile2 => "FASTIO_MDL_READ",
+                FileSystemOperation::QueryOpen => "FASTIO_NETWORK_QUERY_OPEN",
+                FileSystemOperation::FastioCheckIfPossible => "FASTIO_CHECK_IF_POSSIBLE",
+                FileSystemOperation::IrpMj12 => "IRP_MJ_12",
+                FileSystemOperation::IrpMj11 => "IRP_MJ_11",
+                FileSystemOperation::IrpMj10 => "IRP_MJ_10",
+                FileSystemOperation::IrpMj9 => "IRP_MJ_9",
+                FileSystemOperation::IrpMj8 => "IRP_MJ_8",
+                FileSystemOperation::FastioNotifyStreamFoCreation => "FASTIO_NOTIFY_STREAM_FO_CREATION",
+                FileSystemOperation::FastioReleaseForCcFlush => "FASTIO_RELEASE_FOR_CC_FLUSH",
+                FileSystemOperation::FastioAcquireForCcFlush => "FASTIO_ACQUIRE_FOR_CC_FLUSH",
+                FileSystemOperation::FastioReleaseForModWrite => "FASTIO_RELEASE_FOR_MOD_WRITE",
+                FileSystemOperation::FastioAcquireForModWrite => "FASTIO_ACQUIRE_FOR_MOD_WRITE",
+                FileSystemOperation::FastioReleaseForSectionSynchronization => "FASTIO_RELEASE_FOR_SECTION_SYNCHRONIZATION",
+                FileSystemOperation::CreateFileMapping => "FASTIO_ACQUIRE_FOR_SECTION_SYNCHRONIZATION",
+                FileSystemOperation::CreateFile => "IRP_MJ_CREATE",
+                FileSystemOperation::CreatePipe => "IRP_MJ_CREATE_NAMED_PIPE",
+                FileSystemOperation::IrpMjClose => "IRP_MJ_CLOSE",
+                FileSystemOperation::ReadFile => "IRP_MJ_READ",
+                FileSystemOperation::WriteFile => "IRP_MJ_WRITE",
+                FileSystemOperation::QueryInformationFile => "IRP_MJ_QUERY_INFORMATION",
+                FileSystemOperation::SetInformationFile => "IRP_MJ_SET_INFORMATION",
+                FileSystemOperation::QueryEAFile => "IRP_MJ_QUERY_EA",
+                FileSystemOperation::SetEAFile => "IRP_MJ_SET_EA",
+                FileSystemOperation::FlushBuffersFile => "IRP_MJ_FLUSH_BUFFERS",
+                FileSystemOperation::QueryVolumeInformation => "IRP_MJ_QUERY_VOLUME_INFORMATION",
+                FileSystemOperation::SetVolumeInformation => "IRP_MJ_SET_VOLUME_INFORMATION",
+                FileSystemOperation::DirectoryControl => "IRP_MJ_DIRECTORY_CONTROL",
+                FileSystemOperation::FileSystemControl => "IRP_MJ_FILE_SYSTEM_CONTROL",
+                FileSystemOperation::DeviceIoControl => "IRP_MJ_DEVICE_CONTROL",
+                FileSystemOperation::InternalDeviceIoControl => "IRP_MJ_INTERNAL_DEVICE_CONTROL",
+                FileSystemOperation::Shutdown => "IRP_MJ_SHUTDOWN",
+                FileSystemOperation::LockUnlockFile => "IRP_MJ_LOCK_CONTROL",
+                FileSystemOperation::CloseFile => "IRP_MJ_CLEANUP",
+                FileSystemOperation::CreateMailSlot => "IRP_MJ_CREATE_MAILSLOT",
+                FileSystemOperation::QuerySecurityFile => "IRP_MJ_QUERY_SECURITY",
+                FileSystemOperation::SetSecurityFile => "IRP_MJ_SET_SECURITY",
+                FileSystemOperation::Power => "IRP_MJ_POWER",
+                FileSystemOperation::SystemControl => "IRP_MJ_SYSTEM_CONTROL",
+                FileSystemOperation::DeviceChange => "IRP_MJ_DEVICE_CHANGE",
+                FileSystemOperation::QueryFileQuota => "IRP_MJ_QUERY_QUOTA",
+                FileSystemOperation::SetFileQuota => "IRP_MJ_SET_QUOTA",
+                FileSystemOperation::PlugAndPlay => "IRP_MJ_PNP",
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -530,9 +733,21 @@ struct ProfilingEventDetail {
 
 }
 
+impl ProfilingEventDetail {
+    fn describe_subcategory(&self) -> &'static str {
+        "<unknown>"
+    }
+}
+
 #[derive(Debug)]
 struct NetworkEventDetail {
 
+}
+
+impl NetworkEventDetail {
+    fn describe_subcategory(&self) -> &'static str {
+        "<unknown>"
+    }
 }
 
 impl Event {
@@ -583,24 +798,7 @@ impl Event {
     }
 }
 
-// def get_filesystem_event_details(io, metadata, event, extra_detail_io):
-//     sub_operation = read_u8(io)
-//     io.seek(0x3, 1)  # padding
-
-//     # fix operation name if there is more specific sub operation
-//     if 0 != sub_operation and FilesystemOperation[event.operation] in FilesystemSubOperations:
-//         try:
-//             event.operation = FilesystemSubOperations[FilesystemOperation[event.operation]](sub_operation).name
-//         except ValueError:
-//             event.operation += " <Unknown>"
-
-//     details_io = BytesIO(io.read(metadata.sizeof_pvoid * 5 + 0x14))
-//     path_info = read_detail_string_info(io)
-//     io.seek(2, 1)  # Padding
-//     event.path = read_detail_string(io, path_info)
-//     if metadata.should_get_details and event.operation in FilesystemSubOperationHandler:
-//         FilesystemSubOperationHandler[event.operation](io, metadata, event, details_io, extra_detail_io)
-
+#[allow(dead_code)]
 fn hexdump(bytes: &[u8]) {
     let mut line = String::new();
     for c in bytes.chunks(16) {
@@ -686,53 +884,6 @@ impl CreateFileEventDetails {
         })
     }
 }
-
-// def get_filesystem_create_file_details(io, metadata, event, details_io, extra_detail_io):
-//     event.details["Desired Access"] = get_filesystem_access_mask_string(read_u32(io))
-//     impersonating_sid_length = read_u8(io)
-//     io.seek(0x3, 1)  # padding
-
-//     details_io.seek(0x10, 1)
-//     if metadata.sizeof_pvoid == 8:
-//         details_io.seek(4, 1)  # Padding for 64 bit
-
-//     disposition_and_options = read_u32(details_io)
-//     disposition = disposition_and_options >> 0x18
-//     options = disposition_and_options & 0xffffff
-//     if metadata.sizeof_pvoid == 8:
-//         details_io.seek(4, 1)  # Padding for 64 bit
-//     attributes = read_u16(details_io)
-//     share_mode = read_u16(details_io)
-
-//     event.details["Disposition"] = get_enum_name_or(FilesystemDisposition, disposition, "<unknown>")
-//     event.details["Options"] = get_filesysyem_create_options(options)
-//     event.details["Attributes"] = get_filesysyem_create_attributes(attributes)
-//     event.details["ShareMode"] = get_filesysyem_create_share_mode(share_mode)
-
-//     details_io.seek(0x4 + metadata.sizeof_pvoid * 2, 1)
-//     allocation = read_u32(details_io)
-//     allocation_value = allocation if disposition in [FilesystemDisposition.Supersede, FilesystemDisposition.Create,
-//                                                      FilesystemDisposition.OpenIf,
-//                                                      FilesystemDisposition.OverwriteIf] else "n/a"
-//     event.details["AllocationSize"] = allocation_value
-
-//     if impersonating_sid_length:
-//         event.details["Impersonating"] = get_sid_string(io.read(impersonating_sid_length))
-
-//     open_result = None
-//     if extra_detail_io:
-//         open_result = read_u32(extra_detail_io)
-//         event.details["OpenResult"] = get_enum_name_or(FilesystemOpenResult, open_result, "<unknown>")
-
-//     if open_result in [FilesystemOpenResult.Superseded, FilesystemOpenResult.Created, FilesystemOpenResult.Overwritten]:
-//         event.category = "Write"
-//     elif open_result in [FilesystemOpenResult.Opened, FilesystemOpenResult.Exists, FilesystemOpenResult.DoesNotExist]:
-//         pass
-//     elif event.details["Disposition"] in ["Open", "<unknown>"]:
-//         pass
-//     else:
-//         event.category = "Write"
-
 
 struct Process {
     header: ProcessHeader,
