@@ -3,6 +3,7 @@ mod consts;
 mod cursor;
 mod errors;
 
+use crate::consts::FilesystemSetInformationOperation;
 use std::collections::HashMap;
 use std::io::Write;
 use crate::consts::{EventClass, ProcessOperation, RegistryOperation, FileSystemOperation};
@@ -82,21 +83,24 @@ impl<'a> Traces<'a> {
 
     fn write_csv_events<W: Write>(&self, w: &mut csv::Writer<W>) -> anyhow::Result<()> {
         let time_base = Utc.ymd(1601, 1, 1).and_hms(0, 0, 0);
-        w.write_record(&["time", "duration", "category", "subcategory", "process", "path"])?;
+        w.write_record(&["time", "duration", "category", "subcategory", "subop", "process", "path"])?;
 
         for event in self.iter_events() {
             let event = event?;
             let time = time_base + Duration::nanoseconds(event.time as i64) * 100;
+            let duration = Duration::nanoseconds(event.duration_in_100ns as i64) * 100;
             let process = self.processes.get(&event.process_index);
+            let subop = event.event_detail.subop().map(|op| format!("{}", op)).unwrap_or(String::new());
             if process.is_none() {
                 println!("WARNING: couldn't find process for {0} / {0:x}", event.process_index.0);
             }
             let process_path = process.map(|p| self.strings[p.header.image_path_string_index.0 as usize].as_str());
             w.write_record(&[
                 &format!("{}", time),
-                &format!("{}", event.duration_in_100ns),
+                &format!("{}", duration),
                 event.event_detail.describe_category(),
                 event.event_detail.describe_subcategory(),
+                &subop,
                 process_path.unwrap_or("<unknown>"),
                 event.event_detail.path().unwrap_or(""),
             ])?;
@@ -595,6 +599,16 @@ impl EventDetail {
             EventDetail::Network(e) => e.describe_subcategory(),
         }
     }
+
+    fn subop(&self) -> Option<&'static str> {
+        match self {
+            EventDetail::Process(e) => e.subop(),
+            EventDetail::Registry(e) => e.subop(),
+            EventDetail::FileSystem(e) => e.subop(),
+            EventDetail::Profiling(e) => e.subop(),
+            EventDetail::Network(e) => e.subop(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -630,6 +644,10 @@ impl ProcessEventDetail {
             ProcessEventDetail::SystemStatistics => "SystemStatistics",
         }
     }
+
+    fn subop(&self) -> Option<&'static str> {
+        None
+    }
 }
 
 #[derive(Debug)]
@@ -664,6 +682,10 @@ impl RegistryEventDetail {
             RegistryOperation::RegQueryKeySecurity => "RegQueryKeySecurity",
         }
     }
+
+    fn subop(&self) -> Option<&'static str> {
+        None
+    }
 }
 
 #[derive(Debug)]
@@ -681,6 +703,7 @@ impl FileSystemEventDetail {
     fn describe_subcategory(&self) -> &'static str {
         match self.ty {
             FileSystemEventType::CreateFile(_) => "CreateFile",
+            FileSystemEventType::SetInformationFile(_) => "SetInformationFile",
             FileSystemEventType::Other(e) => match e {
                 FileSystemOperation::VolumeDismount => "IRP_MJ_VOLUME_DISMOUNT",
                 FileSystemOperation::VolumeMount => "IRP_MJ_VOLUME_MOUNT",
@@ -733,14 +756,39 @@ impl FileSystemEventDetail {
             }
         }
     }
+
+    fn subop(&self) -> Option<&'static str> {
+        match self.ty {
+            FileSystemEventType::CreateFile(_) => None,
+            FileSystemEventType::SetInformationFile(op) => op.map(|op| match op {
+                FilesystemSetInformationOperation::BasicInformationFile => "BasicInformationFile",
+                FilesystemSetInformationOperation::RenameInformationFile => "RenameInformationFile",
+                FilesystemSetInformationOperation::LinkInformationFile => "LinkInformationFile",
+                FilesystemSetInformationOperation::DispositionInformationFile => "DispositionInformationFile",
+                FilesystemSetInformationOperation::PositionInformationFile => "PositionInformationFile",
+                FilesystemSetInformationOperation::AllocationInformationFile => "AllocationInformationFile",
+                FilesystemSetInformationOperation::EndOfFileInformationFile => "EndOfFileInformationFile",
+                FilesystemSetInformationOperation::FileStreamInformation => "FileStreamInformation",
+                FilesystemSetInformationOperation::PipeInformation => "PipeInformation",
+                FilesystemSetInformationOperation::ValidDataLengthInformationFile => "ValidDataLengthInformationFile",
+                FilesystemSetInformationOperation::ShortNameInformation => "ShortNameInformation",
+                FilesystemSetInformationOperation::ReplaceCompletionInformation => "ReplaceCompletionInformation",
+                FilesystemSetInformationOperation::DispositionInformationEx => "DispositionInformationEx",
+                FilesystemSetInformationOperation::RenameInformationEx => "RenameInformationEx",
+                FilesystemSetInformationOperation::RenameInformationExBypassAccessCheck => "RenameInformationExBypassAccessCheck",
+                FilesystemSetInformationOperation::StorageReservedIdInformation => "StorageReservedIdInformation",
+            }),
+            FileSystemEventType::Other(_) => Some("<unknown>"),
+        }
+    }
 }
 
 #[derive(Debug)]
 enum FileSystemEventType {
     CreateFile(CreateFileEventDetails),
+    SetInformationFile(Option<FilesystemSetInformationOperation>),
     Other(FileSystemOperation),
 }
-
 
 #[derive(Debug)]
 struct ProfilingEventDetail {
@@ -754,6 +802,10 @@ impl ProfilingEventDetail {
 
     fn describe_subcategory(&self) -> &'static str {
         "<unknown>"
+    }
+
+    fn subop(&self) -> Option<&'static str> {
+        None
     }
 }
 
@@ -769,6 +821,10 @@ impl NetworkEventDetail {
 
     fn describe_subcategory(&self) -> &'static str {
         "<unknown>"
+    }
+
+    fn subop(&self) -> Option<&'static str> {
+        None
     }
 }
 
@@ -865,6 +921,7 @@ impl FileSystemEventDetail {
 
         let ty = match op {
             FileSystemOperation::CreateFile => FileSystemEventType::CreateFile(CreateFileEventDetails::parse_from(&mut details_c)?),
+            FileSystemOperation::SetInformationFile => FileSystemEventType::SetInformationFile(FilesystemSetInformationOperation::from_u8(sub_op)),
             op => FileSystemEventType::Other(op),
         };
 

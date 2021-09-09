@@ -126,137 +126,143 @@ pub enum FileSystemOperation {
     PlugAndPlay = 47, // IRP_MJ_PNP
 }
 
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, FromPrimitive)]
+#[repr(u16)]
+pub enum FilesystemQueryVolumeInformationOperation {
+    Information = 0x1,
+    LabelInformation = 0x2,
+    SizeInformation = 0x3,
+    DeviceInformation = 0x4,
+    AttributeInformation = 0x5,
+    ControlInformation = 0x6,
+    FullSizeInformation = 0x7,
+    ObjectIdInformation = 0x8,
+}
 
-// EventClassOperation = {
-//     EventClass.Process: ProcessOperation,
-//     EventClass.Registry: RegistryOperation,
-//     EventClass.File_System: FilesystemOperation,
-//     EventClass.Profiling: ProfilingOperation,
-//     EventClass.Network: NetworkOperation
-// }
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, FromPrimitive)]
+#[repr(u16)]
+pub enum FilesystemSetVolumeInformationOperation {
+    ControlInformation = 0x1,
+    LabelInformation = 0x2,
+    ObjectIdInformation = 0x8,
+}
 
-
-// class FilesystemQueryVolumeInformationOperation(enum.IntEnum):
-//     QueryInformationVolume = 0x1
-//     QueryLabelInformationVolume = 0x2
-//     QuerySizeInformationVolume = 0x3
-//     QueryDeviceInformationVolume = 0x4
-//     QueryAttributeInformationVolume = 0x5
-//     QueryControlInformationVolume = 0x6
-//     QueryFullSizeInformationVolume = 0x7
-//     QueryObjectIdInformationVolume = 0x8
-
-
-// class FilesystemSetVolumeInformationOperation(enum.IntEnum):
-//     SetControlInformationVolume = 0x1
-//     SetLabelInformationVolume = 0x2
-//     SetObjectIdInformationVolume = 0x8
-
-
-// class FilesystemQueryInformationOperation(enum.IntEnum):
-//     QueryBasicInformationFile = 0x4
-//     QueryStandardInformationFile = 0x5
-//     QueryFileInternalInformationFile = 0x6
-//     QueryEaInformationFile = 0x7
-//     QueryNameInformationFile = 0x9
-//     QueryPositionInformationFile = 0xe
-//     QueryAllInformationFile = 0x12
-//     QueryEndOfFile = 0x14
-//     QueryStreamInformationFile = 0x16
-//     QueryCompressionInformationFile = 0x1c
-//     QueryId = 0x1d
-//     QueryMoveClusterInformationFile = 0x1f
-//     QueryNetworkOpenInformationFile = 0x22
-//     # QueryAttributeTag = 0x23
-//     QueryAttributeTagFile = 0x23
-//     QueryIdBothDirectory = 0x25
-//     QueryValidDataLength = 0x27
-//     QueryShortNameInformationFile = 0x28
-//     QueryIoPiorityHint = 0x2b
-//     QueryLinks = 0x2e
-//     QueryNormalizedNameInformationFile = 0x30
-//     QueryNetworkPhysicalNameInformationFile = 0x31
-//     QueryIdGlobalTxDirectoryInformation = 0x32
-//     QueryIsRemoteDeviceInformation = 0x33
-//     QueryAttributeCacheInformation = 0x34
-//     QueryNumaNodeInformation = 0x35
-//     QueryStandardLinkInformation = 0x36
-//     QueryRemoteProtocolInformation = 0x37
-//     QueryRenameInformationBypassAccessCheck = 0x38
-//     QueryLinkInformationBypassAccessCheck = 0x39
-//     QueryVolumeNameInformation = 0x3a
-//     QueryIdInformation = 0x3b
-//     QueryIdExtdDirectoryInformation = 0x3c
-//     QueryHardLinkFullIdInformation = 0x3e
-//     QueryIdExtdBothDirectoryInformation = 0x3f
-//     QueryDesiredStorageClassInformation = 0x43
-//     QueryStatInformation = 0x44
-//     QueryMemoryPartitionInformation = 0x45
-//     QuerySatLxInformation = 0x46
-//     QueryCaseSensitiveInformation = 0x47
-//     QueryLinkInformationEx = 0x48
-//     QueryLinkInfomraitonBypassAccessCheck = 0x49
-//     QueryStorageReservedIdInformation = 0x4a
-//     QueryCaseSensitiveInformationForceAccessCheck = 0x4b
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, FromPrimitive)]
+#[repr(u16)]
+pub enum FilesystemQueryInformationOperation {
+    BasicInformationFile = 0x4,
+    StandardInformationFile = 0x5,
+    FileInternalInformationFile = 0x6,
+    EaInformationFile = 0x7,
+    NameInformationFile = 0x9,
+    PositionInformationFile = 0xe,
+    AllInformationFile = 0x12,
+    EndOfFile = 0x14,
+    StreamInformationFile = 0x16,
+    CompressionInformationFile = 0x1c,
+    Id = 0x1d,
+    MoveClusterInformationFile = 0x1f,
+    NetworkOpenInformationFile = 0x22,
+    // QueryAttributeTag = 0x23,
+    AttributeTagFile = 0x23,
+    IdBothDirectory = 0x25,
+    ValidDataLength = 0x27,
+    ShortNameInformationFile = 0x28,
+    IoPiorityHint = 0x2b,
+    Links = 0x2e,
+    NormalizedNameInformationFile = 0x30,
+    NetworkPhysicalNameInformationFile = 0x31,
+    IdGlobalTxDirectoryInformation = 0x32,
+    IsRemoteDeviceInformation = 0x33,
+    AttributeCacheInformation = 0x34,
+    NumaNodeInformation = 0x35,
+    StandardLinkInformation = 0x36,
+    RemoteProtocolInformation = 0x37,
+    RenameInformationBypassAccessCheck = 0x38,
+    LinkInformationBypassAccessCheck = 0x39,
+    VolumeNameInformation = 0x3a,
+    IdInformation = 0x3b,
+    IdExtdDirectoryInformation = 0x3c,
+    HardLinkFullIdInformation = 0x3e,
+    IdExtdBothDirectoryInformation = 0x3f,
+    DesiredStorageClassInformation = 0x43,
+    StatInformation = 0x44,
+    MemoryPartitionInformation = 0x45,
+    SatLxInformation = 0x46,
+    CaseSensitiveInformation = 0x47,
+    LinkInformationEx = 0x48,
+    LinkInfomraitonBypassAccessCheck = 0x49,
+    StorageReservedIdInformation = 0x4a,
+    CaseSensitiveInformationForceAccessCheck = 0x4b,
+}
 
 
-// class FilesystemSetInformationOperation(enum.IntEnum):
-//     SetBasicInformationFile = 0x4
-//     SetRenameInformationFile = 0xa
-//     SetLinkInformationFile = 0xb
-//     SetDispositionInformationFile = 0xd
-//     SetPositionInformationFile = 0xe
-//     SetAllocationInformationFile = 0x13
-//     SetEndOfFileInformationFile = 0x14
-//     SetFileStreamInformation = 0x16
-//     SetPipeInformation = 0x17
-//     SetValidDataLengthInformationFile = 0x27
-//     SetShortNameInformation = 0x28
-//     SetReplaceCompletionInformation = 0x3d
-//     SetDispositionInformationEx = 0x40
-//     SetRenameInformationEx = 0x41
-//     SetRenameInformationExBypassAccessCheck = 0x42
-//     SetStorageReservedIdInformation = 0x4a
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, FromPrimitive)]
+#[repr(u16)]
+pub enum FilesystemSetInformationOperation {
+    BasicInformationFile = 0x4,
+    RenameInformationFile = 0xa,
+    LinkInformationFile = 0xb,
+    DispositionInformationFile = 0xd,
+    PositionInformationFile = 0xe,
+    AllocationInformationFile = 0x13,
+    EndOfFileInformationFile = 0x14,
+    FileStreamInformation = 0x16,
+    PipeInformation = 0x17,
+    ValidDataLengthInformationFile = 0x27,
+    ShortNameInformation = 0x28,
+    ReplaceCompletionInformation = 0x3d,
+    DispositionInformationEx = 0x40,
+    RenameInformationEx = 0x41,
+    RenameInformationExBypassAccessCheck = 0x42,
+    StorageReservedIdInformation = 0x4a,
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, FromPrimitive)]
+#[repr(u16)]
+pub enum FilesysemDirectoryControlOperation {
+     QueryDirectory = 0x1,
+     NotifyChangeDirectory = 0x2,
+}
 
 
-// class FilesysemDirectoryControlOperation(enum.IntEnum):
-//     QueryDirectory = 0x1,
-//     NotifyChangeDirectory = 0x2,
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, FromPrimitive)]
+#[repr(u16)]
+pub enum FilesystemPnpOperation {
+    StartDevice = 0x0,
+    QueryRemoveDevice = 0x1,
+    RemoveDevice = 0x2,
+    CancelRemoveDevice = 0x3,
+    StopDevice = 0x4,
+    QueryStopDevice = 0x5,
+    CancelStopDevice = 0x6,
+    QueryDeviceRelations = 0x7,
+    QueryInterface = 0x8,
+    QueryCapabilities = 0x9,
+    QueryResources = 0xa,
+    QueryResourceRequirements = 0xb,
+    QueryDeviceText = 0xc,
+    FilterResourceRequirements = 0xd,
+    ReadConfig = 0xf,
+    WriteConfig = 0x10,
+    Eject = 0x11,
+    SetLock = 0x12,
+    QueryId2 = 0x13,
+    QueryPnpDeviceState = 0x14,
+    QueryBusInformation = 0x15,
+    DeviceUsageNotification = 0x16,
+    SurpriseRemoval = 0x17,
+    QueryLegacyBusInformation = 0x18,
+}
 
-
-// class FilesystemPnpOperation(enum.IntEnum):
-//     StartDevice = 0x0
-//     QueryRemoveDevice = 0x1
-//     RemoveDevice = 0x2
-//     CancelRemoveDevice = 0x3
-//     StopDevice = 0x4
-//     QueryStopDevice = 0x5
-//     CancelStopDevice = 0x6
-//     QueryDeviceRelations = 0x7
-//     QueryInterface = 0x8
-//     QueryCapabilities = 0x9
-//     QueryResources = 0xa
-//     QueryResourceRequirements = 0xb
-//     QueryDeviceText = 0xc
-//     FilterResourceRequirements = 0xd
-//     ReadConfig = 0xf
-//     WriteConfig = 0x10
-//     Eject = 0x11
-//     SetLock = 0x12
-//     QueryId2 = 0x13
-//     QueryPnpDeviceState = 0x14
-//     QueryBusInformation = 0x15
-//     DeviceUsageNotification = 0x16
-//     SurpriseRemoval = 0x17
-//     QueryLegacyBusInformation = 0x18
-
-
-// class FilesystemLockUnlockOperation(enum.IntEnum):
-//     LockFile = 0x1  # IRP_MJ_LOCK_CONTROL, FASTIO_LOCK
-//     UnlockFileSingle = 0x2  # IRP_MJ_LOCK_CONTROL, FASTIO_UNLOCK_SINGLE
-//     UnlockFileAll = 0x3  # IRP_MJ_LOCK_CONTROL, FASTIO_UNLOCK_ALL
-//     UnlockFileByKey = 0x4  # IRP_MJ_LOCK_CONTROL, FASTIO_UNLOCK_ALL_BY_KEY
-
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, FromPrimitive)]
+#[repr(u16)]
+pub enum FilesystemLockUnlockOperation {
+    LockFile = 0x1,  // IRP_MJ_LOCK_CONTROL, FASTIO_LOCK
+    UnlockFileSingle = 0x2,  // IRP_MJ_LOCK_CONTROL, FASTIO_UNLOCK_SINGLE
+    UnlockFileAll = 0x3,  // IRP_MJ_LOCK_CONTROL, FASTIO_UNLOCK_ALL
+    UnlockFileByKey = 0x4,  // IRP_MJ_LOCK_CONTROL, FASTIO_UNLOCK_ALL_BY_KEY
+}
 
 // FilesystemSubOperations = {
 //     FilesystemOperation.QueryVolumeInformation: FilesystemQueryVolumeInformationOperation,
