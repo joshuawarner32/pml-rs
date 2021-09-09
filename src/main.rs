@@ -3,6 +3,9 @@ mod consts;
 mod cursor;
 mod errors;
 
+use crate::consts::FilesystemQueryVolumeInformationOperation;
+use crate::consts::FilesystemSetVolumeInformationOperation;
+use crate::consts::FilesystemQueryInformationOperation;
 use crate::consts::FilesystemSetInformationOperation;
 use std::collections::HashMap;
 use std::io::Write;
@@ -704,80 +707,20 @@ impl FileSystemEventDetail {
         match self.ty {
             FileSystemEventType::CreateFile(_) => "CreateFile",
             FileSystemEventType::SetInformationFile(_) => "SetInformationFile",
-            FileSystemEventType::Other(e) => match e {
-                FileSystemOperation::VolumeDismount => "IRP_MJ_VOLUME_DISMOUNT",
-                FileSystemOperation::VolumeMount => "IRP_MJ_VOLUME_MOUNT",
-                FileSystemOperation::FastioMdlWriteComplete => "FASTIO_MDL_WRITE_COMPLETE",
-                FileSystemOperation::WriteFile2 => "FASTIO_PREPARE_MDL_WRITE",
-                FileSystemOperation::FastioMdlReadComplete => "FASTIO_MDL_READ_COMPLETE",
-                FileSystemOperation::ReadFile2 => "FASTIO_MDL_READ",
-                FileSystemOperation::QueryOpen => "FASTIO_NETWORK_QUERY_OPEN",
-                FileSystemOperation::FastioCheckIfPossible => "FASTIO_CHECK_IF_POSSIBLE",
-                FileSystemOperation::IrpMj12 => "IRP_MJ_12",
-                FileSystemOperation::IrpMj11 => "IRP_MJ_11",
-                FileSystemOperation::IrpMj10 => "IRP_MJ_10",
-                FileSystemOperation::IrpMj9 => "IRP_MJ_9",
-                FileSystemOperation::IrpMj8 => "IRP_MJ_8",
-                FileSystemOperation::FastioNotifyStreamFoCreation => "FASTIO_NOTIFY_STREAM_FO_CREATION",
-                FileSystemOperation::FastioReleaseForCcFlush => "FASTIO_RELEASE_FOR_CC_FLUSH",
-                FileSystemOperation::FastioAcquireForCcFlush => "FASTIO_ACQUIRE_FOR_CC_FLUSH",
-                FileSystemOperation::FastioReleaseForModWrite => "FASTIO_RELEASE_FOR_MOD_WRITE",
-                FileSystemOperation::FastioAcquireForModWrite => "FASTIO_ACQUIRE_FOR_MOD_WRITE",
-                FileSystemOperation::FastioReleaseForSectionSynchronization => "FASTIO_RELEASE_FOR_SECTION_SYNCHRONIZATION",
-                FileSystemOperation::CreateFileMapping => "FASTIO_ACQUIRE_FOR_SECTION_SYNCHRONIZATION",
-                FileSystemOperation::CreateFile => "IRP_MJ_CREATE",
-                FileSystemOperation::CreatePipe => "IRP_MJ_CREATE_NAMED_PIPE",
-                FileSystemOperation::IrpMjClose => "IRP_MJ_CLOSE",
-                FileSystemOperation::ReadFile => "IRP_MJ_READ",
-                FileSystemOperation::WriteFile => "IRP_MJ_WRITE",
-                FileSystemOperation::QueryInformationFile => "IRP_MJ_QUERY_INFORMATION",
-                FileSystemOperation::SetInformationFile => "IRP_MJ_SET_INFORMATION",
-                FileSystemOperation::QueryEAFile => "IRP_MJ_QUERY_EA",
-                FileSystemOperation::SetEAFile => "IRP_MJ_SET_EA",
-                FileSystemOperation::FlushBuffersFile => "IRP_MJ_FLUSH_BUFFERS",
-                FileSystemOperation::QueryVolumeInformation => "IRP_MJ_QUERY_VOLUME_INFORMATION",
-                FileSystemOperation::SetVolumeInformation => "IRP_MJ_SET_VOLUME_INFORMATION",
-                FileSystemOperation::DirectoryControl => "IRP_MJ_DIRECTORY_CONTROL",
-                FileSystemOperation::FileSystemControl => "IRP_MJ_FILE_SYSTEM_CONTROL",
-                FileSystemOperation::DeviceIoControl => "IRP_MJ_DEVICE_CONTROL",
-                FileSystemOperation::InternalDeviceIoControl => "IRP_MJ_INTERNAL_DEVICE_CONTROL",
-                FileSystemOperation::Shutdown => "IRP_MJ_SHUTDOWN",
-                FileSystemOperation::LockUnlockFile => "IRP_MJ_LOCK_CONTROL",
-                FileSystemOperation::CloseFile => "IRP_MJ_CLEANUP",
-                FileSystemOperation::CreateMailSlot => "IRP_MJ_CREATE_MAILSLOT",
-                FileSystemOperation::QuerySecurityFile => "IRP_MJ_QUERY_SECURITY",
-                FileSystemOperation::SetSecurityFile => "IRP_MJ_SET_SECURITY",
-                FileSystemOperation::Power => "IRP_MJ_POWER",
-                FileSystemOperation::SystemControl => "IRP_MJ_SYSTEM_CONTROL",
-                FileSystemOperation::DeviceChange => "IRP_MJ_DEVICE_CHANGE",
-                FileSystemOperation::QueryFileQuota => "IRP_MJ_QUERY_QUOTA",
-                FileSystemOperation::SetFileQuota => "IRP_MJ_SET_QUOTA",
-                FileSystemOperation::PlugAndPlay => "IRP_MJ_PNP",
-            }
+            FileSystemEventType::QueryInformationFile(_) => "QueryInformationFile",
+            FileSystemEventType::SetInformationVolume(_) => "SetInformationVolume",
+            FileSystemEventType::QueryInformationVolume(_) => "QueryInformationVolume",
+            FileSystemEventType::Other(e) => e.into(),
         }
     }
 
     fn subop(&self) -> Option<&'static str> {
         match self.ty {
             FileSystemEventType::CreateFile(_) => None,
-            FileSystemEventType::SetInformationFile(op) => op.map(|op| match op {
-                FilesystemSetInformationOperation::BasicInformationFile => "BasicInformationFile",
-                FilesystemSetInformationOperation::RenameInformationFile => "RenameInformationFile",
-                FilesystemSetInformationOperation::LinkInformationFile => "LinkInformationFile",
-                FilesystemSetInformationOperation::DispositionInformationFile => "DispositionInformationFile",
-                FilesystemSetInformationOperation::PositionInformationFile => "PositionInformationFile",
-                FilesystemSetInformationOperation::AllocationInformationFile => "AllocationInformationFile",
-                FilesystemSetInformationOperation::EndOfFileInformationFile => "EndOfFileInformationFile",
-                FilesystemSetInformationOperation::FileStreamInformation => "FileStreamInformation",
-                FilesystemSetInformationOperation::PipeInformation => "PipeInformation",
-                FilesystemSetInformationOperation::ValidDataLengthInformationFile => "ValidDataLengthInformationFile",
-                FilesystemSetInformationOperation::ShortNameInformation => "ShortNameInformation",
-                FilesystemSetInformationOperation::ReplaceCompletionInformation => "ReplaceCompletionInformation",
-                FilesystemSetInformationOperation::DispositionInformationEx => "DispositionInformationEx",
-                FilesystemSetInformationOperation::RenameInformationEx => "RenameInformationEx",
-                FilesystemSetInformationOperation::RenameInformationExBypassAccessCheck => "RenameInformationExBypassAccessCheck",
-                FilesystemSetInformationOperation::StorageReservedIdInformation => "StorageReservedIdInformation",
-            }),
+            FileSystemEventType::QueryInformationVolume(op) => op.map(|op| op.into()),
+            FileSystemEventType::SetInformationVolume(op) => op.map(|op| op.into()),
+            FileSystemEventType::QueryInformationFile(op) => op.map(|op| op.into()),
+            FileSystemEventType::SetInformationFile(op) => op.map(|op| op.into()),
             FileSystemEventType::Other(_) => Some("<unknown>"),
         }
     }
@@ -787,6 +730,9 @@ impl FileSystemEventDetail {
 enum FileSystemEventType {
     CreateFile(CreateFileEventDetails),
     SetInformationFile(Option<FilesystemSetInformationOperation>),
+    QueryInformationFile(Option<FilesystemQueryInformationOperation>),
+    SetInformationVolume(Option<FilesystemSetVolumeInformationOperation>),
+    QueryInformationVolume(Option<FilesystemQueryVolumeInformationOperation>),
     Other(FileSystemOperation),
 }
 
@@ -922,6 +868,9 @@ impl FileSystemEventDetail {
         let ty = match op {
             FileSystemOperation::CreateFile => FileSystemEventType::CreateFile(CreateFileEventDetails::parse_from(&mut details_c)?),
             FileSystemOperation::SetInformationFile => FileSystemEventType::SetInformationFile(FilesystemSetInformationOperation::from_u8(sub_op)),
+            FileSystemOperation::QueryInformationFile => FileSystemEventType::QueryInformationFile(FilesystemQueryInformationOperation::from_u8(sub_op)),
+            FileSystemOperation::SetVolumeInformation => FileSystemEventType::SetInformationVolume(FilesystemSetVolumeInformationOperation::from_u8(sub_op)),
+            FileSystemOperation::QueryVolumeInformation => FileSystemEventType::QueryInformationVolume(FilesystemQueryVolumeInformationOperation::from_u8(sub_op)),
             op => FileSystemEventType::Other(op),
         };
 

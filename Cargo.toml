@@ -12,3 +12,4 @@ csv = "1.1.6"
 anyhow = "1.0.38"
 thiserror = "1.0.24"
 chrono = "0.4.19"
+strum = { version = "0.21", features = ["derive"] }

@@ -1,6 +1,7 @@
 use num_derive::FromPrimitive;    
+use strum::IntoStaticStr;
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, FromPrimitive)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, FromPrimitive, IntoStaticStr)]
 #[repr(u32)]
 pub enum EventClass {
     Unknown = 0,
@@ -11,7 +12,7 @@ pub enum EventClass {
     Network = 5,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, FromPrimitive)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, FromPrimitive, IntoStaticStr)]
 #[repr(u16)]
 pub enum ProcessOperation {
     ProcessDefined = 0,
@@ -26,7 +27,7 @@ pub enum ProcessOperation {
     SystemStatistics = 9,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, FromPrimitive)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, FromPrimitive, IntoStaticStr)]
 #[repr(u16)]
 pub enum RegistryOperation {
     RegOpenKey = 0,
@@ -50,7 +51,7 @@ pub enum RegistryOperation {
 }
 
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, FromPrimitive)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, FromPrimitive, IntoStaticStr)]
 #[repr(u16)]
 pub enum NetworkOperation {
     Unknown = 0,
@@ -65,7 +66,7 @@ pub enum NetworkOperation {
     TCPCopy = 9,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, FromPrimitive)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, FromPrimitive, IntoStaticStr)]
 #[repr(u16)]
 pub enum ProfilingOperation {
     ThreadProfiling = 0,
@@ -73,7 +74,7 @@ pub enum ProfilingOperation {
     DebugOutputProfiling = 2,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, FromPrimitive)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, FromPrimitive, IntoStaticStr)]
 #[repr(u16)]
 pub enum FileSystemOperation {
     VolumeDismount = 0, // IRP_MJ_VOLUME_DISMOUNT
@@ -126,7 +127,7 @@ pub enum FileSystemOperation {
     PlugAndPlay = 47, // IRP_MJ_PNP
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, FromPrimitive)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, FromPrimitive, IntoStaticStr)]
 #[repr(u16)]
 pub enum FilesystemQueryVolumeInformationOperation {
     Information = 0x1,
@@ -139,7 +140,7 @@ pub enum FilesystemQueryVolumeInformationOperation {
     ObjectIdInformation = 0x8,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, FromPrimitive)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, FromPrimitive, IntoStaticStr)]
 #[repr(u16)]
 pub enum FilesystemSetVolumeInformationOperation {
     ControlInformation = 0x1,
@@ -147,7 +148,7 @@ pub enum FilesystemSetVolumeInformationOperation {
     ObjectIdInformation = 0x8,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, FromPrimitive)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, FromPrimitive, IntoStaticStr, )]
 #[repr(u16)]
 pub enum FilesystemQueryInformationOperation {
     BasicInformationFile = 0x4,
@@ -197,7 +198,7 @@ pub enum FilesystemQueryInformationOperation {
 }
 
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, FromPrimitive)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, FromPrimitive, IntoStaticStr)]
 #[repr(u16)]
 pub enum FilesystemSetInformationOperation {
     BasicInformationFile = 0x4,
@@ -218,7 +219,7 @@ pub enum FilesystemSetInformationOperation {
     StorageReservedIdInformation = 0x4a,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, FromPrimitive)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, FromPrimitive, IntoStaticStr)]
 #[repr(u16)]
 pub enum FilesysemDirectoryControlOperation {
      QueryDirectory = 0x1,
@@ -226,7 +227,7 @@ pub enum FilesysemDirectoryControlOperation {
 }
 
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, FromPrimitive)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, FromPrimitive, IntoStaticStr)]
 #[repr(u16)]
 pub enum FilesystemPnpOperation {
     StartDevice = 0x0,
@@ -255,7 +256,7 @@ pub enum FilesystemPnpOperation {
     QueryLegacyBusInformation = 0x18,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, FromPrimitive)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, FromPrimitive, IntoStaticStr)]
 #[repr(u16)]
 pub enum FilesystemLockUnlockOperation {
     LockFile = 0x1,  // IRP_MJ_LOCK_CONTROL, FASTIO_LOCK
