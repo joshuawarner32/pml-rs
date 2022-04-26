@@ -9,6 +9,7 @@ use crate::cursor::{Cursor, Parse};
 use crate::errors::{FormatError};
 use num_traits::FromPrimitive;    
 use std::mem::MaybeUninit;
+use strum::IntoStaticStr;
 use std::fmt;
 
 pub struct Traces<'a> {
@@ -507,8 +508,9 @@ pub struct Event {
     pub captured_stack_depth: u16,
 }
 
-#[derive(Debug)]
+#[derive(Debug, IntoStaticStr)]
 pub enum EventDetail {
+    Unknown,
     Process(ProcessEventDetail),
     Registry(RegistryEventDetail),
     FileSystem(FileSystemEventDetail),
@@ -519,6 +521,7 @@ pub enum EventDetail {
 impl EventDetail {
     pub fn path(&self) -> Option<&str> {
         match self {
+            EventDetail::Unknown => None,
             EventDetail::Process(e) => e.path(),
             EventDetail::Registry(e) => e.path(),
             EventDetail::FileSystem(e) => e.path(),
@@ -528,17 +531,12 @@ impl EventDetail {
     }
 
     pub fn describe_category(&self) -> &'static str {
-        match self {
-            EventDetail::Process(_) => "Process",
-            EventDetail::Registry(_) => "Registry",
-            EventDetail::FileSystem(_) => "FileSystem",
-            EventDetail::Profiling(_) => "Profiling",
-            EventDetail::Network(_) => "Network",
-        }
+        self.into()
     }
 
     pub fn describe_subcategory(&self) -> &'static str {
         match self {
+            EventDetail::Unknown => "unknown",
             EventDetail::Process(e) => e.describe_subcategory(),
             EventDetail::Registry(e) => e.describe_subcategory(),
             EventDetail::FileSystem(e) => e.describe_subcategory(),
@@ -549,6 +547,7 @@ impl EventDetail {
 
     pub fn subop(&self) -> Option<&'static str> {
         match self {
+            EventDetail::Unknown => None,
             EventDetail::Process(e) => e.subop(),
             EventDetail::Registry(e) => e.subop(),
             EventDetail::FileSystem(e) => e.subop(),
@@ -558,7 +557,7 @@ impl EventDetail {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, IntoStaticStr)]
 pub enum ProcessEventDetail {
     ProcessDefined,
     ProcessCreate,
@@ -578,18 +577,7 @@ impl ProcessEventDetail {
     }
 
     pub fn describe_subcategory(&self) -> &'static str {
-        match self {
-            ProcessEventDetail::ProcessDefined => "ProcessDefined",
-            ProcessEventDetail::ProcessCreate => "ProcessCreate",
-            ProcessEventDetail::ProcessExit => "ProcessExit",
-            ProcessEventDetail::ThreadCreate => "ThreadCreate",
-            ProcessEventDetail::ThreadExit => "ThreadExit",
-            ProcessEventDetail::LoadImage => "LoadImage",
-            ProcessEventDetail::ThreadProfile => "ThreadProfile",
-            ProcessEventDetail::ProcessStart => "ProcessStart",
-            ProcessEventDetail::ProcessStatistics => "ProcessStatistics",
-            ProcessEventDetail::SystemStatistics => "SystemStatistics",
-        }
+        self.into()
     }
 
     pub fn subop(&self) -> Option<&'static str> {
@@ -608,26 +596,7 @@ impl RegistryEventDetail {
     }
 
     pub fn describe_subcategory(&self) -> &'static str {
-        match self.op {
-            RegistryOperation::RegOpenKey => "RegOpenKey",
-            RegistryOperation::RegCreateKey => "RegCreateKey",
-            RegistryOperation::RegCloseKey => "RegCloseKey",
-            RegistryOperation::RegQueryKey => "RegQueryKey",
-            RegistryOperation::RegSetValue => "RegSetValue",
-            RegistryOperation::RegQueryValue => "RegQueryValue",
-            RegistryOperation::RegEnumValue => "RegEnumValue",
-            RegistryOperation::RegEnumKey => "RegEnumKey",
-            RegistryOperation::RegSetInfoKey => "RegSetInfoKey",
-            RegistryOperation::RegDeleteKey => "RegDeleteKey",
-            RegistryOperation::RegDeleteValue => "RegDeleteValue",
-            RegistryOperation::RegFlushKey => "RegFlushKey",
-            RegistryOperation::RegLoadKey => "RegLoadKey",
-            RegistryOperation::RegUnloadKey => "RegUnloadKey",
-            RegistryOperation::RegRenameKey => "RegRenameKey",
-            RegistryOperation::RegQueryMultipleValueKey => "RegQueryMultipleValueKey",
-            RegistryOperation::RegSetKeySecurity => "RegSetKeySecurity",
-            RegistryOperation::RegQueryKeySecurity => "RegQueryKeySecurity",
-        }
+        self.op.into()
     }
 
     pub fn subop(&self) -> Option<&'static str> {
@@ -755,7 +724,9 @@ impl Event {
                 EventClass::Network => {
                     EventDetail::Network(NetworkEventDetail {})
                 },
-                EventClass::Unknown => panic!(),
+                EventClass::Unknown => {
+                    EventDetail::Unknown
+                }
             },
             event_type: e.event_type,
             duration_in_100ns: e.duration_in_100ns,

@@ -1,4 +1,5 @@
-
+use clap::Parser;
+use std::path::PathBuf;
 use chrono::prelude::*;
 use chrono::Duration;
 use std::io::Write;
@@ -9,11 +10,20 @@ mod cursor;
 mod errors;
 mod structs;
 
+/// Simple program to greet a person
+#[derive(Parser, Debug)]
+#[clap(author, version, about, long_about = None)]
+struct Args {
+    input: PathBuf,
+    output: PathBuf,
+}
+
+
 fn main() {
-    let args = std::env::args().skip(1).collect::<Vec<_>>();
-    let file = &args[0];
-    let output = &args[1];
-    assert_eq!(args.len(), 2);
+    let args = Args::parse();
+    let file = &args.input;
+    let output = &args.output;
+
     let data = std::fs::read(file).unwrap();
 
     let traces = Traces::decode(&data).unwrap();
